@@ -10,6 +10,11 @@
 #   HUBOT_MEMEGEN_DIMENSIONS
 #
 # Commands:
+#   hubot add meme /<meme regex with two groups>/ <generatorID> <imageID>
+#   hubot remove meme /<meme regex>/
+#   hubot list memes
+#   hubot export memes <format: either "code" or "json">
+#   hubot import memes --url=<url>
 #   hubot Y U NO <text>  - Generates the Y U NO GUY with the bottom caption of <text>
 #   hubot I don't always <something> but when i do <text> - Generates The Most Interesting man in the World
 #   hubot <text> ORLY? - Generates the ORLY? owl with the top caption of <text>
@@ -31,91 +36,48 @@
 #   skalnik
 
 module.exports = (robot) ->
-  unless robot.brain.data.memes?
-    robot.brain.data.memes = [
-      {
-        regex: /(Y U NO) (.+)/i,
-        generatorID: 2,
-        imageID: 166088
-      },
-      {
-        regex: /(I DON'?T ALWAYS .*) (BUT WHEN I DO,? .*)/i,
-        generatorID: 74,
-        imageID: 2485
-      },
-      {
-        regex: /(.*)(O\s?RLY\??.*)/i,
-        generatorID: 920,
-        imageID: 117049
-      },
-      {
-        regex: /(.*)(SUCCESS|NAILED IT.*)/i,
-        generatorID: 121,
-        imageID: 1031
-      },
-      {
-        regex: /(.*) (ALL the .*)/i,
-        generatorID: 6013,
-        imageID: 1121885
-      },
-      {
-        regex: /(.*) (\w+\sTOO DAMN .*)/i,
-        generatorID: 998,
-        imageID: 203665
-      },
-      {
-        regex: /(GOOD NEWS EVERYONE[,.!]?) (.*)/i,
-        generatorID: 1591,
-        imageID: 112464
-      },
-      {
-        regex: /(NOT SURE IF .*) (OR .*)/i,
-        generatorID: 305,
-        imageID: 84688
-      },
-      {
-        regex: /(YO DAWG .*) (SO .*)/i,
-        generatorID: 79,
-        imageID: 108785
-      },
-      {
-        regex: /(ALL YOUR .*) (ARE BELONG TO US)/i,
-        generatorID: 349058,
-        imageID: 2079825
-      },
-      {
-        regex: /(.*) (FUCK YOU)/i,
-        generatorID: 1189472,
-        imageID: 5044147
-      },
-      {
-        regex: /(.*) (You'?re gonna have a bad time)/i,
-        generatorID: 825296,
-        imageID: 3786537
-      },
-      {
-        regex: /(one does not simply) (.*)/i,
-        generatorID: 274947,
-        imageID: 1865027
-      },
-      {
-        regex: /(grumpy cat) (.*),(.*)/i,
-        generatorID: 1590955,
-        imageID: 6541210
-      }
-    ]
 
-  for meme in robot.brain.data.memes
-    memeResponder robot, meme
+  robot.respond /remove meme \/(.+)\//i, (msg) ->
+    setUpMemes robot.brain
+    delete robot.brain.data.memes[msg.match[1]]
+    msg.reply khanify("Meme deleted")
 
-  robot.respond /add meme \/(.+)\/i,(.+),(.+)/i, (msg) ->
-    meme =
-      regex: new RegExp(msg.match[1], "i")
-      generatorID: parseInt(msg.match[2])
-      imageID: parseInt(msg.match[3])
+  robot.respond /(.*)/i, (msg) ->
+    setUpMemes robot.brain
+    for reg, meme of robot.brain.data.memes
+      regex = new RegExp(meme.regex.toString(), "i")
+      continue unless regex.test(msg.match[1])
+      matches = msg.match[1].match regex
+      memeResponder(msg, matches, meme)
 
-    robot.brain.data.memes.push meme
-    memeResponder robot, meme
+  robot.respond /add meme \/(.+)\/\s+(.+)\s+(.+)/i, (msg) ->
+    setUpMemes robot.brain
+    rememberMeme robot.brain, msg.match[1], parseInt(msg.match[2]), parseInt(msg.match[3])
+    msg.reply khanify("Meme added")
+
+  robot.respond /list memes/i, (msg) ->
+    setUpMemes robot.brain
+    memesList = for reg, meme of robot.brain.data.memes
+      meme.regex
+    msg.reply memesList.join('\n')
+
+  robot.respond /export memes (code|json)/i, (msg) ->
+    setUpMemes robot.brain
+    console.log msg.match[1].toLowerCase()
+    if msg.match[1].toLowerCase() == 'code'
+      memesList = for reg, meme of robot.brain.data.memes
+        ["rememberMeme brain, '", meme.regex.replace('\\', '\\\\'), "', ", meme.generatorID, ", ", meme.imageID].join('')
+      msg.reply memesList.join('\n')
+    else
+      msg.reply JSON.stringify(robot.brain.data.memes) + '\n'
+
+  robot.respond /import memes --campfire=(.+)/i, (msg) ->
+    filename = msg.match[1]
+    filedata = msg.robot.adapter.getUploads
+    console.log filedata
+
+  robot.respond /import memes --url=(.+)/i, (msg) ->
+    importMemesFromUrl robot, msg, msg.match[1]
 
   robot.respond /k(?:ha|ah)nify (.*)/i, (msg) ->
     memeGenerator msg, 6443, 1123022, "", khanify(msg.match[1]), (url) ->
@@ -129,10 +91,44 @@ module.exports = (robot) ->
     memeGenerator msg, 542616, 2729805, msg.match[1], msg.match[3], (url) ->
       msg.send url
 
-memeResponder = (robot, meme) ->
-  robot.respond meme.regex, (msg) ->
-    memeGenerator msg, meme.generatorID, meme.imageID, msg.match[1], msg.match[2], (url) ->
-      msg.send url
+importMemesFromUrl = (robot, msg, url) ->
+  console.log url
+  msg.http(url).get() (err, res, body) ->
+    importedData = JSON.parse(body)
+    for regex, meme of importedData
+      robot.brain.data.memes[regex] = meme
+    msg.reply khanify("Import successful")
+
+
+setUpMemes = (brain) ->
+  unless brain.data.memes?
+    brain.data.memes = {}
+    rememberMeme brain, '(Y U NO) (.+)', 2, 166088
+    rememberMeme brain, '(I DON\'?T ALWAYS .*) (BUT WHEN I DO,? .*)', 74, 2485
+    rememberMeme brain, '(.*)(O\\s?RLY\\??.*)', 920, 117049
+    rememberMeme brain, '(.*)(SUCCESS|NAILED IT.*)', 121, 1031
+    rememberMeme brain, '(.*) (ALL the .*)', 6013, 1121885
+    rememberMeme brain, '(.*) (\\w+\\sTOO DAMN .*)', 998, 203665
+    rememberMeme brain, '(GOOD NEWS EVERYONE[,.!]?) (.*)', 1591, 112464
+    rememberMeme brain, '(NOT SURE IF .*) (OR .*)', 305, 84688
+    rememberMeme brain, '(YO DAWG .*) (SO .*)', 79, 108785
+    rememberMeme brain, '(ALL YOUR .*) (ARE BELONG TO US)', 349058, 2079825
+    rememberMeme brain, '(.*) (FUCK YOU)', 1189472, 5044147
+    rememberMeme brain, '(.*) (You\'?re gonna have a bad time)', 825296, 3786537
+    rememberMeme brain, '(one does not simply) (.*)', 274947, 1865027
+    rememberMeme brain, 'grumpy cat (.*),(.*)', 1590955, 6541210
+
+rememberMeme = (brain, regex, generatorID, imageID) ->
+    meme =
+      regex: regex
+      generatorID: generatorID
+      imageID: imageID
+    brain.data.memes[regex] = meme
+
+memeResponder = (msg, matches, meme) ->
+  msg.reply "Generating your meme..."
+  memeGenerator msg, meme.generatorID, meme.imageID, matches[1], matches[2], (url) ->
+    msg.send url
 
 memeGenerator = (msg, generatorID, imageID, text0, text1, callback) ->
   username = process.env.HUBOT_MEMEGEN_USERNAME
